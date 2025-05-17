@@ -7,14 +7,10 @@ import uuid
 
 app = Flask(__name__)
 
-# Directory to store downloaded videos
 DOWNLOAD_FOLDER = 'downloads'
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# Cleanup delay in seconds (e.g., 10 minutes)
-CLEANUP_DELAY = 600
-
-# Store info about downloaded files and their cleanup timers
+CLEANUP_DELAY = 600  # seconds (10 minutes)
 downloaded_files = {}
 
 def schedule_file_cleanup(filepath):
@@ -37,11 +33,11 @@ def video_info():
         return jsonify({'error': 'No URL provided'}), 400
 
     ydl_opts = {'quiet': True, 'skip_download': True}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-        except Exception as e:
-            return jsonify({'error': f'Failed to extract info: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Failed to extract info: {str(e)}'}), 500
 
     formats = [
         {
@@ -70,17 +66,20 @@ def download():
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    # Generate unique filename to avoid collisions
     unique_id = str(uuid.uuid4())
     output_template = os.path.join(DOWNLOAD_FOLDER, f'{unique_id}.%(ext)s')
 
     ydl_opts = {
-        'format': format_id if format_id else 'best',
+        'format': format_id if format_id else 'bestvideo+bestaudio/best',
         'outtmpl': output_template,
         'merge_output_format': 'mp4',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',
+        }],
     }
 
     try:
@@ -89,7 +88,6 @@ def download():
     except Exception as e:
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
-    # Find the downloaded file path
     ext = info.get('ext', 'mp4')
     filename = f"{unique_id}.{ext}"
     filepath = os.path.join(DOWNLOAD_FOLDER, filename)
@@ -97,10 +95,7 @@ def download():
     if not os.path.exists(filepath):
         return jsonify({'error': 'Downloaded file not found'}), 500
 
-    # Schedule file cleanup after delay
     schedule_file_cleanup(filepath)
-
-    # Store the file info for possible future use (optional)
     downloaded_files[unique_id] = filepath
 
     download_url = f'/download/{filename}'
@@ -109,10 +104,8 @@ def download():
 
 @app.route('/download/<path:filename>', methods=['GET'])
 def serve_file(filename):
-    # Security check: prevent directory traversal
     if '..' in filename or filename.startswith('/'):
         abort(400)
-
     return send_from_directory(DOWNLOAD_FOLDER, filename, as_attachment=True)
 
 @app.route('/health')
