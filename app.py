@@ -4,8 +4,12 @@ import os
 import threading
 import time
 import uuid
+import logging
 
 app = Flask(__name__)
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 
 DOWNLOAD_FOLDER = 'downloads'
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
@@ -19,9 +23,9 @@ def schedule_file_cleanup(filepath):
         try:
             if os.path.exists(filepath):
                 os.remove(filepath)
-                print(f"Deleted file: {filepath}")
+                app.logger.info(f"Deleted file: {filepath}")
         except Exception as e:
-            print(f"Error deleting file {filepath}: {e}")
+            app.logger.error(f"Error deleting file {filepath}: {e}")
 
     threading.Thread(target=cleanup, daemon=True).start()
 
@@ -37,6 +41,7 @@ def video_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
+        app.logger.error(f"Failed to extract info: {e}", exc_info=True)
         return jsonify({'error': f'Failed to extract info: {str(e)}'}), 500
 
     formats = [
@@ -60,6 +65,9 @@ def video_info():
 @app.route('/api/download', methods=['POST'])
 def download():
     data = request.json
+    if not data:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+
     url = data.get('url')
     format_id = data.get('format_id')
 
@@ -86,6 +94,7 @@ def download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
     except Exception as e:
+        app.logger.error(f"Download failed: {e}", exc_info=True)
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
     ext = info.get('ext', 'mp4')
@@ -93,6 +102,7 @@ def download():
     filepath = os.path.join(DOWNLOAD_FOLDER, filename)
 
     if not os.path.exists(filepath):
+        app.logger.error(f"Downloaded file not found: {filepath}")
         return jsonify({'error': 'Downloaded file not found'}), 500
 
     schedule_file_cleanup(filepath)
@@ -104,6 +114,7 @@ def download():
 
 @app.route('/download/<path:filename>', methods=['GET'])
 def serve_file(filename):
+    # Prevent directory traversal attacks
     if '..' in filename or filename.startswith('/'):
         abort(400)
     return send_from_directory(DOWNLOAD_FOLDER, filename, as_attachment=True)
