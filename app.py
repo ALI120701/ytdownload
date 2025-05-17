@@ -5,16 +5,16 @@ import threading
 import time
 import uuid
 import logging
+import subprocess
 
 app = Flask(__name__)
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 
 DOWNLOAD_FOLDER = 'downloads'
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-CLEANUP_DELAY = 600  # seconds (10 minutes)
+CLEANUP_DELAY = 600  # 10 minutes
 downloaded_files = {}
 
 def schedule_file_cleanup(filepath):
@@ -114,7 +114,6 @@ def download():
 
 @app.route('/download/<path:filename>', methods=['GET'])
 def serve_file(filename):
-    # Prevent directory traversal attacks
     if '..' in filename or filename.startswith('/'):
         abort(400)
     return send_from_directory(DOWNLOAD_FOLDER, filename, as_attachment=True)
@@ -122,6 +121,14 @@ def serve_file(filename):
 @app.route('/health')
 def health():
     return 'OK', 200
+
+@app.route('/ffmpeg_version')
+def ffmpeg_version():
+    try:
+        version = subprocess.check_output(['ffmpeg', '-version']).decode('utf-8').split('\n')[0]
+        return jsonify({'ffmpeg_version': version})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
